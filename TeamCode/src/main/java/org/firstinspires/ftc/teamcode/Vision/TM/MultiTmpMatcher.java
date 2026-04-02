@@ -1,15 +1,23 @@
 package org.firstinspires.ftc.teamcode.Vision.TM;
 
+import android.content.Context;
+import android.content.res.Resources;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+
+import org.firstinspires.ftc.robotcore.internal.camera.calibration.CameraCalibration;
 import org.opencv.core.*;
 import org.opencv.imgcodecs.Imgcodecs;
 import org.opencv.imgproc.Imgproc;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.*;
 
 public class MultiTmpMatcher {
     private static final int MAX_MISSING_FRAMES = 5;
     private static final double NMS_IOU_THRESHOLD = 0.3;
-    private static final double MATCH_THRESHOLD = 0.8;
+    private static final double MATCH_THRESHOLD = 0.7;
     private static final double SCALE_MIN = 0.5;
     private static final double SCALE_MAX = 2.0;
     private static final double SCALE_STEP = 0.2;
@@ -18,8 +26,10 @@ public class MultiTmpMatcher {
     private List<String> templateNames;
     private List<TrackedObject> trackedObjects;
     private int nextObjectId;
+    private Context context;
     
-    public MultiTmpMatcher(String templateName) {
+    public MultiTmpMatcher(Context context, String templateName) {
+        this.context = context;
         this.trackedObjects = new ArrayList<>();
         this.nextObjectId = 0;
         this.templates = new ArrayList<>();
@@ -28,7 +38,8 @@ public class MultiTmpMatcher {
         addTemplate(templateName);
     }
     
-    public MultiTmpMatcher(List<String> templateNames) {
+    public MultiTmpMatcher(Context context, List<String> templateNames) {
+        this.context = context;
         this.trackedObjects = new ArrayList<>();
         this.nextObjectId = 0;
         this.templates = new ArrayList<>();
@@ -40,14 +51,42 @@ public class MultiTmpMatcher {
     }
     
     private void addTemplate(String templateName) {
-        String templatePath = "Vision/TM/template/" + templateName;
-        Mat template = Imgcodecs.imread(templatePath);
-        if (template.empty()) {
-            System.err.println("Failed to load template: " + templatePath);
-            return;
+        try {
+            Mat template = loadTemplateFromResources(templateName);
+            
+            if (template.empty()) {
+                System.err.println("Failed to load template: " + templateName);
+                return;
+            }
+            templates.add(template);
+            this.templateNames.add(templateName);
+        } catch (Exception e) {
+            System.err.println("Error loading template: " + e.getMessage());
         }
-        templates.add(template);
-        this.templateNames.add(templateName);
+    }
+    
+    // 从 Android 资源加载模板
+    private Mat loadTemplateFromResources(String templateName) throws IOException {
+        // 移除文件扩展名，获取资源 ID
+        String resourceName = templateName.replace(".jpg", "");
+        int resourceId = context.getResources().getIdentifier(resourceName, "raw", context.getPackageName());
+        
+        if (resourceId == 0) {
+            System.err.println("Resource not found: " + resourceName);
+            return new Mat();
+        }
+        
+        // 从资源中读取图像
+        InputStream inputStream = context.getResources().openRawResource(resourceId);
+        Bitmap bitmap = BitmapFactory.decodeStream(inputStream);
+        inputStream.close();
+        
+        // 将 Bitmap 转换为 OpenCV Mat
+        Mat mat = new Mat();
+        org.opencv.android.Utils.bitmapToMat(bitmap, mat);
+        bitmap.recycle();
+        
+        return mat;
     }
     
     public void processFrame(Mat frame) {
@@ -72,6 +111,9 @@ public class MultiTmpMatcher {
         Mat grayFrame = new Mat();
         Imgproc.cvtColor(frame, grayFrame, Imgproc.COLOR_BGR2GRAY);
         
+        // 增加对比度，提高匹配准确性
+        Imgproc.equalizeHist(grayFrame, grayFrame);
+        
         for (int templateIdx = 0; templateIdx < templates.size(); templateIdx++) {
             Mat template = templates.get(templateIdx);
             String templateName = templateNames.get(templateIdx);
@@ -87,6 +129,9 @@ public class MultiTmpMatcher {
                 
                 Mat grayTemplate = new Mat();
                 Imgproc.cvtColor(resizedTemplate, grayTemplate, Imgproc.COLOR_BGR2GRAY);
+                
+                // 增加模板对比度
+                Imgproc.equalizeHist(grayTemplate, grayTemplate);
                 
                 int resultCols = grayFrame.cols() - grayTemplate.cols() + 1;
                 int resultRows = grayFrame.rows() - grayTemplate.rows() + 1;
@@ -240,27 +285,27 @@ public class MultiTmpMatcher {
     public static class MultiTmpMatcherProcessor implements org.firstinspires.ftc.vision.VisionProcessor {
         private MultiTmpMatcher matcher;
         
-        public MultiTmpMatcherProcessor(String templateName) {
-            this.matcher = new MultiTmpMatcher(templateName);
+        public MultiTmpMatcherProcessor(Context context, String templateName) {
+            this.matcher = new MultiTmpMatcher(context, templateName);
         }
         
-        public MultiTmpMatcherProcessor(List<String> templateNames) {
-            this.matcher = new MultiTmpMatcher(templateNames);
+        public MultiTmpMatcherProcessor(Context context, List<String> templateNames) {
+            this.matcher = new MultiTmpMatcher(context, templateNames);
         }
-        
+
+
         @Override
-        public void init(int width, int height, org.firstinspires.ftc.vision.CameraCalibration calibration) {
-            // 初始化方法，当摄像头启动时调用
+        public void init(int i, int i1, CameraCalibration cameraCalibration) {
+
         }
-        
-        @Override
+
         public Object processFrame(org.opencv.core.Mat frame, long captureTimeNanos) {
             // 处理每一帧图像
             matcher.processFrame(frame);
             return null; // 返回值可以用于传递处理结果
         }
         
-        @Override
+
         public void onDrawFrame(android.graphics.Canvas canvas, int onscreenWidth, int onscreenHeight, float scaleBmpPxToCanvasPx, float scaleCanvasDensity, Object userContext) {
             // 在Driver Station屏幕上绘制结果
             // 这里可以留空，因为我们已经在processFrame中在Mat上绘制了结果

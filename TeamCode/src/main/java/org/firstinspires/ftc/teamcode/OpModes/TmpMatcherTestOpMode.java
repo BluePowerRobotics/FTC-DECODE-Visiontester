@@ -23,17 +23,19 @@ public class TmpMatcherTestOpMode extends LinearOpMode {
         telemetry.addData("Status", "Initializing TmpMatcher...");
         telemetry.update();
         
+        // 初始化模板列表
+        java.util.ArrayList<String> templates = new java.util.ArrayList<>();
+        templates.add("purpleball_template_1.jpg");
+        templates.add("greenball_template_1.jpg");
+        
         // 初始化模板匹配器
         try {
             // 使用实际存在的模板图像
-            purpleMatcher = new TmpMatcher("purpleball_template_1.jpg");
-            greenMatcher = new TmpMatcher("greenball_template_1.jpg");
+            purpleMatcher = new TmpMatcher(hardwareMap.appContext, "purpleball_template_1.jpg");
+            greenMatcher = new TmpMatcher(hardwareMap.appContext, "greenball_template_1.jpg");
             
             // 初始化多模板匹配器
-            java.util.ArrayList<String> templates = new java.util.ArrayList<>();
-            templates.add("purpleball_template_1.jpg");
-            templates.add("greenball_template_1.jpg");
-            multiMatcher = new MultiTmpMatcher(templates);
+            multiMatcher = new MultiTmpMatcher(hardwareMap.appContext, templates);
             
             telemetry.addData("TmpMatcher", "Created successfully");
             telemetry.addData("Purple Matcher", "Initialized");
@@ -64,7 +66,7 @@ public class TmpMatcherTestOpMode extends LinearOpMode {
             // 添加处理器（选择其中一个）
             // 注意：一次只能添加一个处理器，因为它们会修改同一个图像
             // 这里我们使用多模板匹配器的处理器
-            MultiTmpMatcher.MultiTmpMatcherProcessor multiProcessor = new MultiTmpMatcher.MultiTmpMatcherProcessor(templates);
+            MultiTmpMatcher.MultiTmpMatcherProcessor multiProcessor = new MultiTmpMatcher.MultiTmpMatcherProcessor(hardwareMap.appContext, templates);
             builder.addProcessor(multiProcessor);
             
             // 更新multiMatcher引用，以便获取检测结果

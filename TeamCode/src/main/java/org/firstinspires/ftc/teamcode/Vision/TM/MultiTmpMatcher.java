@@ -40,11 +40,22 @@ public class MultiTmpMatcher {
     }
     
     private void addTemplate(String templateName) {
-        String templatePath = "Vision/TM/template/" + templateName;
+        // 尝试使用绝对路径
+        String templatePath = "TeamCode/src/main/java/org/firstinspires/ftc/teamcode/Vision/TM/template/" + templateName;
         Mat template = Imgcodecs.imread(templatePath);
         if (template.empty()) {
-            System.err.println("Failed to load template: " + templatePath);
-            return;
+            // 尝试使用相对路径
+            templatePath = "src/main/java/org/firstinspires/ftc/teamcode/Vision/TM/template/" + templateName;
+            template = Imgcodecs.imread(templatePath);
+            if (template.empty()) {
+                // 尝试使用另一种相对路径
+                templatePath = "Vision/TM/template/" + templateName;
+                template = Imgcodecs.imread(templatePath);
+                if (template.empty()) {
+                    System.err.println("Failed to load template: " + templateName);
+                    return;
+                }
+            }
         }
         templates.add(template);
         this.templateNames.add(templateName);

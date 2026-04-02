@@ -25,21 +25,11 @@ public class TmpMatcher {
         this.nextObjectId = 0;
         
         // 加载模板图像
-        String templatePath = "TeamCode/src/main/java/org/firstinspires/ftc/teamcode/Vision/TM/template/" + templateName;
+        String templatePath = "Vision/TM/template/" + templateName;
         this.template = Imgcodecs.imread(templatePath);
         if (template.empty()) {
-            // 尝试使用相对路径
-            templatePath = "src/main/java/org/firstinspires/ftc/teamcode/Vision/TM/template/" + templateName;
-            this.template = Imgcodecs.imread(templatePath);
-            if (template.empty()) {
-                // 尝试使用另一种相对路径
-                templatePath = "Vision/TM/template/" + templateName;
-                this.template = Imgcodecs.imread(templatePath);
-                if (template.empty()) {
-                    System.err.println("Failed to load template: " + templateName);
-                    return;
-                }
-            }
+            System.err.println("Failed to load template: " + templatePath);
+            return;
         }
     }
     
@@ -245,6 +235,37 @@ public class TmpMatcher {
     
     public List<TrackedObject> getTrackedObjects() {
         return trackedObjects;
+    }
+    
+    // 内部类：VisionProcessor实现，用于与VisionPortal集成
+    public static class TmpMatcherProcessor implements org.firstinspires.ftc.vision.VisionProcessor {
+        private TmpMatcher matcher;
+        
+        public TmpMatcherProcessor(String templateName) {
+            this.matcher = new TmpMatcher(templateName);
+        }
+        
+        @Override
+        public void init(int width, int height, org.firstinspires.ftc.vision.CameraCalibration calibration) {
+            // 初始化方法，当摄像头启动时调用
+        }
+        
+        @Override
+        public Object processFrame(org.opencv.core.Mat frame, long captureTimeNanos) {
+            // 处理每一帧图像
+            matcher.processFrame(frame);
+            return null; // 返回值可以用于传递处理结果
+        }
+        
+        @Override
+        public void onDrawFrame(android.graphics.Canvas canvas, int onscreenWidth, int onscreenHeight, float scaleBmpPxToCanvasPx, float scaleCanvasDensity, Object userContext) {
+            // 在Driver Station屏幕上绘制结果
+            // 这里可以留空，因为我们已经在processFrame中在Mat上绘制了结果
+        }
+        
+        public TmpMatcher getMatcher() {
+            return matcher;
+        }
     }
     
     // 内部类：跟踪对象

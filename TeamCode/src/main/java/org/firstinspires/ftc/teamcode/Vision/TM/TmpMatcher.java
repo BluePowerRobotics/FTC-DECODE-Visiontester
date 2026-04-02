@@ -25,11 +25,21 @@ public class TmpMatcher {
         this.nextObjectId = 0;
         
         // 加载模板图像
-        String templatePath = "Vision/TM/template/" + templateName;
+        String templatePath = "TeamCode/src/main/java/org/firstinspires/ftc/teamcode/Vision/TM/template/" + templateName;
         this.template = Imgcodecs.imread(templatePath);
         if (template.empty()) {
-            System.err.println("Failed to load template: " + templatePath);
-            return;
+            // 尝试使用相对路径
+            templatePath = "src/main/java/org/firstinspires/ftc/teamcode/Vision/TM/template/" + templateName;
+            this.template = Imgcodecs.imread(templatePath);
+            if (template.empty()) {
+                // 尝试使用另一种相对路径
+                templatePath = "Vision/TM/template/" + templateName;
+                this.template = Imgcodecs.imread(templatePath);
+                if (template.empty()) {
+                    System.err.println("Failed to load template: " + templateName);
+                    return;
+                }
+            }
         }
     }
     

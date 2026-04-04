@@ -1,0 +1,113 @@
+package org.firstinspires.ftc.teamcode.Controllers.Limelight;
+
+import com.acmerobotics.dashboard.config.Config;
+import com.acmerobotics.dashboard.telemetry.TelemetryPacket;
+import com.qualcomm.robotcore.hardware.DcMotor;
+import com.qualcomm.robotcore.hardware.DcMotorEx;
+import com.qualcomm.robotcore.hardware.DcMotorSimple;
+import com.qualcomm.robotcore.hardware.HardwareMap;
+import com.qualcomm.robotcore.util.Range;
+
+import org.firstinspires.ftc.robotcore.external.Telemetry;
+import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
+import org.firstinspires.ftc.teamcode.utility.PIDController;
+
+//单个弹射飞轮的PID控制器
+@Config
+public class Motor_PID {
+    public double BlockPower = -0.3;
+    public DcMotorEx Motor_PID;
+    TelemetryPacket packet = new TelemetryPacket();
+    double[] speedBuffer = new double[10];
+    Telemetry telemetry;
+    double Power = 0;
+    double current_speed = 0;
+    double current_time;
+    double previous_time;
+    double current_encoder = 0;
+    double previous_encoder = 0;
+    double current_error;
+    double previous_error;
+    public double degreePertick = 0;
+    public double k_p = 0.01;
+    public double k_i = 0.4;
+    public double k_d = 0.012;
+    public double max_i = 1;
+    private PIDController pidController;
+
+    public void motor(HardwareMap hardwareMap, Telemetry telemetry, String motorName, boolean ifReverse){
+        Motor_PID = hardwareMap.get(DcMotorEx.class, motorName);
+        Motor_PID.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+        Motor_PID.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+        Motor_PID.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        if(ifReverse)
+            Motor_PID.setDirection(DcMotorSimple.Direction.REVERSE);
+        else
+            Motor_PID.setDirection(DcMotorSimple.Direction.FORWARD);
+        this.telemetry = telemetry;
+        pidController = new PIDController(k_p, k_i, k_d, max_i);
+        previous_time = System.currentTimeMillis();
+
+    }
+    public double getVelocity(){
+        return Motor_PID.getVelocity();
+    }
+    /**
+     *
+     * 单位：与°/s线性相关，但大概率不是°/s(idk)
+     *应该比预期转速高80-100
+     */
+    //todo:fix low velocity issue
+    public boolean turn(double targetSpeed,double targetAngle, double currentAngle){
+
+        pidController.setPID(k_p,k_i,k_d);
+        //如果是double，不可以 == 0，需要写abs < 0.0001
+        if(Double.isNaN(targetAngle) || Math.abs(targetAngle) < 0.0001){
+            Motor_PID.setPower(0);
+            pidController.reset();
+            previous_time = System.currentTimeMillis();
+            return true;
+        }
+        Motor_PID.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+        current_time = System.currentTimeMillis();
+        current_encoder = Motor_PID.getCurrentPosition();
+        current_speed = Motor_PID.getVelocity(AngleUnit.DEGREES);
+        double dt = (current_time - previous_time);
+        if (dt <= 0) dt = 1; // 防止除零
+        Power = pidController.calculate(targetSpeed, current_speed, dt);
+        //避免出现负功率，导致震荡或电机损伤
+        if(targetSpeed > 0){
+            Power = Range.clip(Power, 0.001, 1);
+        }
+        Motor_PID.setPower(Power);
+        previous_time = current_time;
+        //角度误差判断
+        double angleError = targetAngle - currentAngle;
+        if(Math.abs(angleError) < 50){
+            return true;
+        } else {
+            return false;
+        }
+    }
+    public void block(){
+        //telemetry.addData("blockPower", BlockPower);
+        Motor_PID.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+    }
+
+    public double getCurrent_encoder(){
+        return current_encoder;
+    }
+    public double getPower(){
+        return Power;
+    }
+    public double getCurrent_speed(){
+        return current_speed;
+    }
+
+
+
+
+
+}
+
+

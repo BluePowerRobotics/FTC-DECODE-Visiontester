@@ -11,7 +11,7 @@ import java.util.List;
 public class Detector {
     private Limelight3A limelight;
     private static final int PIPELINE_INDEX = 5; // 使用pipeline5
-    
+
     /**
      * 构造函数
      * @param hardwareMap 硬件映射
@@ -20,52 +20,51 @@ public class Detector {
         limelight = hardwareMap.get(Limelight3A.class, "limelight");
         limelight.pipelineSwitch(PIPELINE_INDEX);
     }
-    
+
     public void start(){
         if (limelight != null) {
             limelight.start();
         }
     }
     /**
-     * 获取指定对象的中心坐标
+     * 获取指定对象的归一化坐标
      * @param objectName 对象名称
-     * @return 二维数组，每行表示一个对象的归一化中心坐标 [x, y]
+     * @return 二维数组，每行表示一个对象的归一化坐标 [m, n]，m为x方向偏移(左正右负)，n为y方向偏移(上正下负)
      */
     public double[][] get_center(String objectName) {
         LLResult result = limelight.getLatestResult();
         List<double[]> centers = new ArrayList<>();
-        
+
         if (result != null && result.isValid()) {
             // 获取检测器结果
             List<LLResultTypes.DetectorResult> detectorResults = result.getDetectorResults();
-            
+
             for (LLResultTypes.DetectorResult dr : detectorResults) {
                 // 检查对象名称是否匹配
                 if (dr.getClassName().equals(objectName)) {
                     // 获取像素坐标偏移（相对于画面中心）
                     double txp = dr.getTargetXPixels();
                     double typ = dr.getTargetYPixels();
-                    
-                    // 转换为相对于画面中心点的偏移，左上角偏移为正
-                    // Limelight默认：txp正值表示右侧，typ正值表示下方
-                    // 转换后：x正值表示左侧，y正值表示上方
-                    double offsetX = -txp;
-                    double offsetY = -typ;
-                    
-                    centers.add(new double[]{offsetX, offsetY});
+
+                    // 归一化到0-1范围（取画面长边为1，假设图像分辨率为640x480）
+                    // m对应x方向偏移，n对应y方向偏移
+                    double m = -txp / 320.0; // x方向归一化，左侧为正
+                    double n = -typ / 320.0; // y方向归一化，上方为正（均取长边320为基准）
+
+                    centers.add(new double[]{m, n});
                 }
             }
         }
-        
+
         // 将List转换为二维数组
         double[][] resultArray = new double[centers.size()][2];
         for (int i = 0; i < centers.size(); i++) {
             resultArray[i] = centers.get(i);
         }
-        
+
         return resultArray;
     }
-    
+
     /**
      * 停止Limelight
      */

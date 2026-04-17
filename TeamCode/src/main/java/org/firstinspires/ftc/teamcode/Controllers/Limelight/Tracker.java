@@ -11,6 +11,7 @@ public class Tracker {
     private List<Target> targets;
     private List<CandidateTarget> candidateTargets;
     private int nextTargetId;
+    private static int nextMemberId;
     private Map<Target, Integer> removalPending;
     private double distanceThreshold;
     private int confirmationFrames;
@@ -21,6 +22,7 @@ public class Tracker {
         this.targets = new ArrayList<>();
         this.candidateTargets = new ArrayList<>();
         this.nextTargetId = 0;
+        nextMemberId = 0;
         this.removalPending = new HashMap<>();
         this.distanceThreshold = distanceThreshold;
         this.confirmationFrames = confirmationFrames;
@@ -116,7 +118,7 @@ public class Tracker {
             }
 
             if (matchedTarget != null) {
-                matchedTarget.updateMembers(group);
+                matchedTarget.updateGroupAndMembers(group, confirmationFrames);
                 matchedTarget.lastSeenTimestamp = System.currentTimeMillis();
                 matchedTargets.add(matchedTarget);
                 removalPending.remove(matchedTarget);
@@ -125,8 +127,17 @@ public class Tracker {
 
         for (Target target : targets) {
             if (!matchedTargets.contains(target)) {
+                target.markAllMembersMissed();
                 int count = removalPending.getOrDefault(target, 0) + 1;
                 removalPending.put(target, count);
+            }
+        }
+
+        List<Target> toCheckEmpty = new ArrayList<>(targets);
+        for (Target target : toCheckEmpty) {
+            target.removeStaleMembers(removalFrames, confirmationFrames);
+            if (target.isEmpty()) {
+                removalPending.put(target, removalFrames);
             }
         }
     }
@@ -156,19 +167,19 @@ public class Tracker {
             }
 
             if (matchedCandidate != null) {
-                matchedCandidate.updateMembers(group);
+                matchedCandidate.updateGroupAndMembers(group);
                 matchedCandidate.consecutiveFrames++;
                 matchedCandidate.consecutiveMisses = 0;
                 matchedCandidates.add(matchedCandidate);
 
                 if (matchedCandidate.consecutiveFrames >= confirmationFrames) {
                     Target newTarget = new Target(nextTargetId++);
-                    newTarget.updateMembers(matchedCandidate.memberDetections);
+                    newTarget.updateGroupAndMembers(matchedCandidate.members, confirmationFrames);
                     targets.add(newTarget);
                     toRemove.add(matchedCandidate);
                 }
             } else {
-                CandidateTarget newCandidate = new CandidateTarget(group);
+                CandidateTarget newCandidate = new CandidateTarget(nextMemberId++, group);
                 candidateTargets.add(newCandidate);
             }
         }
@@ -197,7 +208,7 @@ public class Tracker {
             Target target = entry.getKey();
             int count = entry.getValue();
 
-            if (count >= removalFrames) {
+            if (count >= removalFrames && target.getActiveMemberCount(confirmationFrames) == 0) {
                 toRemove.add(target);
             }
         }
@@ -217,6 +228,8 @@ public class Tracker {
         double bestScore = -1;
 
         for (Target target : targets) {
+            if (target.isEmpty()) continue;
+            if (target.getActiveMemberCount(confirmationFrames) == 0) continue;
             double score = computeTargetScore(target);
             if (score > bestScore) {
                 bestScore = score;
@@ -228,7 +241,7 @@ public class Tracker {
     }
 
     private double computeTargetScore(Target target) {
-        int memberCount = target.memberDetections.size();
+        int memberCount = target.getActiveMemberCount(confirmationFrames);
         double distance = Math.sqrt(Math.pow(target.centerX, 2) + Math.pow(target.centerY, 2));
         if (distance == 0) {
             distance = 0.1;
@@ -279,84 +292,214 @@ public class Tracker {
 
     public static class Target {
         public int id;
-        public List<Detection> memberDetections;
+        public Map<Integer, Member> members;
         public double centerX;
         public double centerY;
         public long lastSeenTimestamp;
 
         public Target(int id) {
             this.id = id;
-            this.memberDetections = new ArrayList<>();
+            this.members = new HashMap<>();
             this.centerX = 0;
             this.centerY = 0;
             this.lastSeenTimestamp = System.currentTimeMillis();
         }
 
-        public void updateMembers(List<Detection> detections) {
-            this.memberDetections = new ArrayList<>(detections);
-            updateCenter();
+        public void updateGroupAndMembers(List<Detection> group, int confirmationFrames) {
+            Set<Integer> processedMemberIds = new HashSet<>();
+
+            for (Detection detection : group) {
+                Member matchedMember = null;
+                double minDistance = Double.MAX_VALUE;
+
+                for (Map.Entry<Integer, Member> entry : members.entrySet()) {
+                    Member member = entry.getValue();
+                    if (member.detection.color.equals(detection.color)) {
+                        double distance = member.detection.distanceTo(detection);
+                        if (distance < minDistance) {
+                            minDistance = distance;
+                            matchedMember = member;
+                        }
+                    }
+                }
+
+                if (matchedMember != null && minDistance <= 0.3) {
+                    matchedMember.consecutiveFrames++;
+                    matchedMember.consecutiveMisses = 0;
+                    matchedMember.detection = detection;
+                    processedMemberIds.add(matchedMember.id);
+                } else {
+                    Member newMember = new Member(Tracker.nextMemberId++, detection);
+                    members.put(newMember.id, newMember);
+                    processedMemberIds.add(newMember.id);
+                }
+            }
+
+            for (Map.Entry<Integer, Member> entry : members.entrySet()) {
+                if (!processedMemberIds.contains(entry.getKey())) {
+                    Member m = entry.getValue();
+                    m.consecutiveMisses++;
+                    m.consecutiveFrames = 0;
+                }
+            }
+
+            updateCenter(confirmationFrames);
         }
 
-        public void updateCenter() {
-            if (memberDetections.isEmpty()) {
+        public void updateGroupAndMembers(Map<Integer, Member> existingMembers, int confirmationFrames) {
+            this.members = new HashMap<>(existingMembers);
+            updateCenter(confirmationFrames);
+        }
+
+        public void markAllMembersMissed() {
+            for (Member member : members.values()) {
+                member.consecutiveMisses++;
+                member.consecutiveFrames = 0;
+            }
+        }
+
+        public void removeStaleMembers(int removalFrames, int confirmationFrames) {
+            List<Integer> toRemove = new ArrayList<>();
+            for (Map.Entry<Integer, Member> entry : members.entrySet()) {
+                if (entry.getValue().consecutiveMisses >= removalFrames) {
+                    toRemove.add(entry.getKey());
+                }
+            }
+            for (Integer id : toRemove) {
+                members.remove(id);
+            }
+            updateCenter(confirmationFrames);
+        }
+
+        public int getActiveMemberCount(int confirmationFrames) {
+            int count = 0;
+            for (Member member : members.values()) {
+                if (member.consecutiveFrames >= confirmationFrames) {
+                    count++;
+                }
+            }
+            return count;
+        }
+
+        public void updateCenter(int confirmationFrames) {
+            int activeCount = 0;
+            double sumX = 0, sumY = 0;
+            for (Member member : members.values()) {
+                if (member.consecutiveFrames >= confirmationFrames) {
+                    sumX += member.detection.x;
+                    sumY += member.detection.y;
+                    activeCount++;
+                }
+            }
+
+            if (activeCount == 0) {
                 centerX = 0;
                 centerY = 0;
-                return;
+            } else {
+                centerX = sumX / activeCount;
+                centerY = sumY / activeCount;
             }
-
-            double sumX = 0, sumY = 0;
-            for (Detection detection : memberDetections) {
-                sumX += detection.x;
-                sumY += detection.y;
-            }
-
-            centerX = sumX / memberDetections.size();
-            centerY = sumY / memberDetections.size();
         }
 
         public boolean isEmpty() {
-            return memberDetections.isEmpty();
+            return members.isEmpty();
         }
 
         public double getDistanceToCamera() {
             return Math.sqrt(Math.pow(centerX, 2) + Math.pow(centerY, 2));
         }
+
+        public static class Member {
+            public int id;
+            public Detection detection;
+            public int consecutiveFrames;
+            public int consecutiveMisses;
+
+            public Member(int id, Detection detection) {
+                this.id = id;
+                this.detection = detection;
+                this.consecutiveFrames = 1;
+                this.consecutiveMisses = 0;
+            }
+        }
     }
 
     public static class CandidateTarget {
-        public List<Detection> memberDetections;
+        public Map<Integer, Target.Member> members;
         public double centerX;
         public double centerY;
         public int consecutiveFrames;
         public int consecutiveMisses;
+        private int nextMemberId;
 
-        public CandidateTarget(List<Detection> detections) {
-            this.memberDetections = new ArrayList<>(detections);
+        public CandidateTarget(int startMemberId, List<Detection> group) {
+            this.members = new HashMap<>();
+            this.nextMemberId = startMemberId;
+            for (Detection detection : group) {
+                Target.Member member = new Target.Member(Tracker.nextMemberId++, detection);
+                members.put(member.id, member);
+            }
             this.consecutiveFrames = 1;
             this.consecutiveMisses = 0;
             updateCenter();
         }
 
-        public void updateMembers(List<Detection> detections) {
-            this.memberDetections = new ArrayList<>(detections);
+        public void updateGroupAndMembers(List<Detection> group) {
+            Set<Integer> processedMemberIds = new HashSet<>();
+
+            for (Detection detection : group) {
+                Target.Member matchedMember = null;
+                double minDistance = Double.MAX_VALUE;
+
+                for (Map.Entry<Integer, Target.Member> entry : members.entrySet()) {
+                    Target.Member member = entry.getValue();
+                    if (member.detection.color.equals(detection.color)) {
+                        double distance = member.detection.distanceTo(detection);
+                        if (distance < minDistance) {
+                            minDistance = distance;
+                            matchedMember = member;
+                        }
+                    }
+                }
+
+                if (matchedMember != null && minDistance <= 0.3) {
+                    matchedMember.consecutiveFrames++;
+                    matchedMember.consecutiveMisses = 0;
+                    matchedMember.detection = detection;
+                    processedMemberIds.add(matchedMember.id);
+                } else {
+                    Target.Member newMember = new Target.Member(Tracker.nextMemberId++, detection);
+                    members.put(newMember.id, newMember);
+                    processedMemberIds.add(newMember.id);
+                }
+            }
+
+            for (Map.Entry<Integer, Target.Member> entry : members.entrySet()) {
+                if (!processedMemberIds.contains(entry.getKey())) {
+                    Target.Member m = entry.getValue();
+                    m.consecutiveMisses++;
+                    m.consecutiveFrames = 0;
+                }
+            }
+
             updateCenter();
         }
 
-        public void updateCenter() {
-            if (memberDetections.isEmpty()) {
+        private void updateCenter() {
+            if (members.isEmpty()) {
                 centerX = 0;
                 centerY = 0;
                 return;
             }
 
             double sumX = 0, sumY = 0;
-            for (Detection detection : memberDetections) {
-                sumX += detection.x;
-                sumY += detection.y;
+            for (Target.Member member : members.values()) {
+                sumX += member.detection.x;
+                sumY += member.detection.y;
             }
 
-            centerX = sumX / memberDetections.size();
-            centerY = sumY / memberDetections.size();
+            centerX = sumX / members.size();
+            centerY = sumY / members.size();
         }
     }
 }
